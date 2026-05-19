@@ -1,0 +1,13 @@
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+*.test
+*.prof
+vendor/
+*.swo
+coverage.txt
+.idea/
+*.out
