@@ -14,21 +14,27 @@ export interface WatcherOptions {
 export class Watcher {
   private tailer: Tailer;
   private options: WatcherOptions;
+  private predicate: ((line: string) => boolean) | null = null;
 
   constructor(options: WatcherOptions) {
     this.options = options;
     this.tailer = new Tailer(options.tailerOptions);
+
+    // Pre-build the filter predicate once rather than on every line
+    if (options.filter) {
+      this.predicate = buildFilter(options.filter);
+    }
+
     this.tailer.on('line', (line: string) => this.handleLine(line));
     this.tailer.on('truncated', () => console.warn('[logsnap] File truncated, resetting position.'));
     this.tailer.on('error', (err: Error) => console.error('[logsnap] Error:', err.message));
   }
 
   private handleLine(line: string): void {
-    const { filter, highlight, exportJson, onLine } = this.options;
+    const { highlight, exportJson, onLine } = this.options;
 
-    if (filter) {
-      const predicate = buildFilter(filter);
-      const matched = filterLines([line], predicate);
+    if (this.predicate) {
+      const matched = filterLines([line], this.predicate);
       if (matched.length === 0) return;
     }
 
