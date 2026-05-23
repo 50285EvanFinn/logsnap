@@ -41,6 +41,14 @@ describe('computeStats', () => {
     expect(empty.errorRate).toBe(0);
     expect(empty.firstTimestamp).toBeUndefined();
   });
+
+  it('handles input with no timestamped lines', () => {
+    const noTimestamps = formatLines(['just a plain log line', 'another plain line']);
+    const result = computeStats(noTimestamps);
+    expect(result.firstTimestamp).toBeUndefined();
+    expect(result.lastTimestamp).toBeUndefined();
+    expect(result.total).toBe(2);
+  });
 });
 
 describe('formatStats', () => {
