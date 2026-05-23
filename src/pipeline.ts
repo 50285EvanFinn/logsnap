@@ -1,52 +1,70 @@
-import { buildFilter, filterLines, FilterOptions } from './filter';
-import { highlightLines } from './highlighter';
+/**
+ * pipeline.ts
+ * Orchestrates the full log processing pipeline:
+ * filter → deduplicate → rate-limit → truncate → format → highlight
+ */
+
+import { filterLines, buildFilter } from './filter';
+import { deduplicateAndFormat } from './deduplicator';
+import { createRateLimiterState, rateLimitLine } from './ratelimiter';
+import { truncateLines } from './truncator';
 import { formatLines } from './formatter';
-import { computeStats, formatStats } from './stats';
-import { writeSnapshot, SnapshotOptions, SnapshotResult } from './snapshot';
+import { highlightLines } from './highlighter';
 
 export interface PipelineOptions {
-  filter?: FilterOptions;
+  filter?: string;
+  caseSensitive?: boolean;
+  deduplication?: boolean;
+  rateLimit?: number;        // max lines per window
+  rateLimitWindow?: number;  // window in ms
+  maxLineLength?: number;
   highlight?: string[];
-  format?: boolean;
-  stats?: boolean;
-  snapshot?: SnapshotOptions;
-}
-
-export interface PipelineOutput {
-  lines: string[];
-  stats?: string;
-  snapshot?: SnapshotResult;
+  color?: boolean;
 }
 
 export function runPipeline(
-  rawLines: string[],
+  lines: string[],
   options: PipelineOptions = {}
-): PipelineOutput {
-  let lines = [...rawLines];
+): string[] {
+  const {
+    filter,
+    caseSensitive = false,
+    deduplication = false,
+    rateLimit,
+    rateLimitWindow = 1000,
+    maxLineLength,
+    highlight = [],
+    color = true,
+  } = options;
 
-  if (options.filter) {
-    const predicate = buildFilter(options.filter);
-    lines = filterLines(lines, predicate);
+  // 1. Filter
+  let result = filter
+    ? filterLines(lines, buildFilter(filter, { caseSensitive }))
+    : lines;
+
+  // 2. Deduplicate
+  if (deduplication) {
+    result = deduplicateAndFormat(result);
   }
 
-  if (options.format) {
-    lines = formatLines(lines);
+  // 3. Rate-limit
+  if (rateLimit !== undefined) {
+    const state = createRateLimiterState(rateLimit, rateLimitWindow);
+    result = result.filter((line) => rateLimitLine(line, state));
   }
 
-  if (options.highlight && options.highlight.length > 0) {
-    lines = highlightLines(lines, options.highlight);
+  // 4. Truncate
+  if (maxLineLength !== undefined) {
+    result = truncateLines(result, { maxLength: maxLineLength });
   }
 
-  const output: PipelineOutput = { lines };
+  // 5. Format (level detection, timestamps)
+  result = formatLines(result);
 
-  if (options.stats) {
-    const statsData = computeStats(rawLines);
-    output.stats = formatStats(statsData);
+  // 6. Highlight
+  if (color && highlight.length > 0) {
+    result = highlightLines(result, highlight);
   }
 
-  if (options.snapshot) {
-    output.snapshot = writeSnapshot(lines, options.snapshot);
-  }
-
-  return output;
+  return result;
 }
