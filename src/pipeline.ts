@@ -1,69 +1,68 @@
-/**
- * pipeline.ts
- * Orchestrates the full log processing pipeline:
- * filter → deduplicate → rate-limit → truncate → format → highlight
- */
-
-import { filterLines, buildFilter } from './filter';
-import { deduplicateAndFormat } from './deduplicator';
-import { createRateLimiterState, rateLimitLine } from './ratelimiter';
-import { truncateLines } from './truncator';
-import { formatLines } from './formatter';
-import { highlightLines } from './highlighter';
+import { buildFilter } from "./filter";
+import { highlightLines } from "./highlighter";
+import { formatLines } from "./formatter";
+import { computeStats, formatStats } from "./stats";
+import { deduplicateAndFormat } from "./deduplicator";
+import { truncateLines } from "./truncator";
+import { applyContextWindow, formatContextResults } from "./contextwindow";
 
 export interface PipelineOptions {
   filter?: string;
-  caseSensitive?: boolean;
-  deduplication?: boolean;
-  rateLimit?: number;        // max lines per window
-  rateLimitWindow?: number;  // window in ms
-  maxLineLength?: number;
-  highlight?: string[];
-  color?: boolean;
+  highlight?: string;
+  format?: boolean;
+  deduplicate?: boolean;
+  truncate?: number;
+  showStats?: boolean;
+  contextBefore?: number;
+  contextAfter?: number;
 }
 
-export function runPipeline(
-  lines: string[],
-  options: PipelineOptions = {}
-): string[] {
-  const {
-    filter,
-    caseSensitive = false,
-    deduplication = false,
-    rateLimit,
-    rateLimitWindow = 1000,
-    maxLineLength,
-    highlight = [],
-    color = true,
-  } = options;
+export function runPipeline(lines: string[], options: PipelineOptions): string[] {
+  let result = [...lines];
 
-  // 1. Filter
-  let result = filter
-    ? filterLines(lines, buildFilter(filter, { caseSensitive }))
-    : lines;
+  // 1. Context window (apply before filtering to preserve surrounding lines)
+  if (
+    (options.contextBefore !== undefined && options.contextBefore > 0) ||
+    (options.contextAfter !== undefined && options.contextAfter > 0)
+  ) {
+    const matchFn = options.filter
+      ? buildFilter(options.filter)
+      : () => true;
+    const contextResults = applyContextWindow(result, matchFn, {
+      before: options.contextBefore ?? 0,
+      after: options.contextAfter ?? 0,
+    });
+    result = formatContextResults(contextResults);
+  } else if (options.filter) {
+    // 2. Filter (only if no context window, since context handles filtering)
+    const matchFn = buildFilter(options.filter);
+    result = result.filter(matchFn);
+  }
 
-  // 2. Deduplicate
-  if (deduplication) {
+  // 3. Deduplicate
+  if (options.deduplicate) {
     result = deduplicateAndFormat(result);
   }
 
-  // 3. Rate-limit
-  if (rateLimit !== undefined) {
-    const state = createRateLimiterState(rateLimit, rateLimitWindow);
-    result = result.filter((line) => rateLimitLine(line, state));
-  }
-
   // 4. Truncate
-  if (maxLineLength !== undefined) {
-    result = truncateLines(result, { maxLength: maxLineLength });
+  if (options.truncate !== undefined && options.truncate > 0) {
+    result = truncateLines(result, options.truncate);
   }
 
-  // 5. Format (level detection, timestamps)
-  result = formatLines(result);
+  // 5. Format
+  if (options.format) {
+    result = formatLines(result);
+  }
 
   // 6. Highlight
-  if (color && highlight.length > 0) {
-    result = highlightLines(result, highlight);
+  if (options.highlight) {
+    result = highlightLines(result, options.highlight);
+  }
+
+  // 7. Stats
+  if (options.showStats) {
+    const stats = computeStats(lines);
+    result = [...result, "", ...formatStats(stats)];
   }
 
   return result;
