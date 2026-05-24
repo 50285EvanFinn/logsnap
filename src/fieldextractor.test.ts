@@ -24,6 +24,12 @@ describe('extractFieldsFromJson', () => {
   it('returns null for JSON arrays', () => {
     expect(extractFieldsFromJson('["a","b"]')).toBeNull();
   });
+
+  it('returns null for JSON primitives', () => {
+    expect(extractFieldsFromJson('42')).toBeNull();
+    expect(extractFieldsFromJson('"just a string"')).toBeNull();
+    expect(extractFieldsFromJson('true')).toBeNull();
+  });
 });
 
 describe('extractFieldsFromKV', () => {
@@ -52,6 +58,11 @@ describe('extractFields', () => {
     const line = 'status=ok code=200';
     expect(extractFields(line)).toEqual({ status: 'ok', code: 200 });
   });
+
+  it('falls back to kv parsing when JSON parse fails', () => {
+    const line = '{bad json} status=ok';
+    expect(extractFields(line)).toEqual({ status: 'ok' });
+  });
 });
 
 describe('pickFields', () => {
@@ -62,6 +73,10 @@ describe('pickFields', () => {
 
   it('ignores missing keys silently', () => {
     expect(pickFields({ a: 1 }, ['a', 'z'])).toEqual({ a: 1 });
+  });
+
+  it('returns empty object when no keys match', () => {
+    expect(pickFields({ a: 1, b: 2 }, ['x', 'y'])).toEqual({});
   });
 });
 
