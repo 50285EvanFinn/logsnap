@@ -1,68 +1,56 @@
 import { buildFilter } from "./filter";
 import { highlightLines } from "./highlighter";
-import { formatLines } from "./formatter";
-import { computeStats, formatStats } from "./stats";
-import { deduplicateAndFormat } from "./deduplicator";
+import { filterByLevel } from "./levelfilter";
 import { truncateLines } from "./truncator";
-import { applyContextWindow, formatContextResults } from "./contextwindow";
+import { deduplicateAndFormat } from "./deduplicator";
+import { aggregateLines, AggregatorOptions } from "./multilineaggregator";
 
 export interface PipelineOptions {
   filter?: string;
-  highlight?: string;
-  format?: boolean;
+  level?: string;
+  highlight?: string[];
+  maxLineLength?: number;
   deduplicate?: boolean;
-  truncate?: number;
-  showStats?: boolean;
-  contextBefore?: number;
-  contextAfter?: number;
+  aggregate?: boolean;
+  aggregatePattern?: RegExp;
 }
 
 export function runPipeline(lines: string[], options: PipelineOptions): string[] {
   let result = [...lines];
 
-  // 1. Context window (apply before filtering to preserve surrounding lines)
-  if (
-    (options.contextBefore !== undefined && options.contextBefore > 0) ||
-    (options.contextAfter !== undefined && options.contextAfter > 0)
-  ) {
-    const matchFn = options.filter
-      ? buildFilter(options.filter)
-      : () => true;
-    const contextResults = applyContextWindow(result, matchFn, {
-      before: options.contextBefore ?? 0,
-      after: options.contextAfter ?? 0,
-    });
-    result = formatContextResults(contextResults);
-  } else if (options.filter) {
-    // 2. Filter (only if no context window, since context handles filtering)
-    const matchFn = buildFilter(options.filter);
-    result = result.filter(matchFn);
+  // 1. Aggregate multi-line entries before any per-line processing
+  if (options.aggregate) {
+    const aggOptions: AggregatorOptions = {
+      startPattern: options.aggregatePattern ?? /^\d{4}-\d{2}-\d{2}/,
+    };
+    const entries = aggregateLines(result, aggOptions);
+    result = entries.map((e) => e.raw);
   }
 
-  // 3. Deduplicate
+  // 2. Filter by text / regex
+  if (options.filter) {
+    const filterFn = buildFilter(options.filter);
+    result = result.filter(filterFn);
+  }
+
+  // 3. Filter by log level
+  if (options.level) {
+    result = filterByLevel(result, options.level);
+  }
+
+  // 4. Deduplicate
   if (options.deduplicate) {
     result = deduplicateAndFormat(result);
   }
 
-  // 4. Truncate
-  if (options.truncate !== undefined && options.truncate > 0) {
-    result = truncateLines(result, options.truncate);
-  }
-
-  // 5. Format
-  if (options.format) {
-    result = formatLines(result);
+  // 5. Truncate long lines
+  if (options.maxLineLength) {
+    result = truncateLines(result, options.maxLineLength);
   }
 
   // 6. Highlight
-  if (options.highlight) {
+  if (options.highlight && options.highlight.length > 0) {
     result = highlightLines(result, options.highlight);
-  }
-
-  // 7. Stats
-  if (options.showStats) {
-    const stats = computeStats(lines);
-    result = [...result, "", ...formatStats(stats)];
   }
 
   return result;
